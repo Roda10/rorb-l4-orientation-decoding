@@ -1,4 +1,3 @@
-@"
 name: rorb-decoding
 channels:
   - conda-forge
@@ -14,7 +13,7 @@ dependencies:
   - jupyter
   - pyyaml
   - tqdm
+  - greenlet
   - pip
   - pip:
       - allensdk
-"@ | Set-Content environment.yml
