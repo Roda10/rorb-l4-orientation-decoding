@@ -14,6 +14,8 @@ import sys
 import pandas as pd
 from allensdk.core.brain_observatory_cache import BrainObservatoryCache
 
+from config import CRE_LINES, TARGETED_STRUCTURES, STIMULUS
+
 
 def get_cache_dir():
     """
@@ -69,7 +71,7 @@ def get_boc(manifest_path=None):
     return BrainObservatoryCache(manifest_file=manifest_path)
 
 
-def get_eligible_containers(boc, cre_lines, targeted_structures):
+def get_eligible_containers(boc, cre_lines=CRE_LINES, targeted_structures=TARGETED_STRUCTURES):
     """
     Find experiment containers matching Cre line and cortical areas.
 
@@ -95,7 +97,12 @@ def get_eligible_containers(boc, cre_lines, targeted_structures):
     return pd.DataFrame(containers)
 
 
-def get_eligible_experiments(boc, cre_lines, targeted_structures, stimuli):
+def get_eligible_experiments(
+    boc,
+    cre_lines=CRE_LINES,
+    targeted_structures=TARGETED_STRUCTURES,
+    stimuli=(STIMULUS,),
+):
     """
     Find ophys experiment sessions matching the project filters.
 
@@ -112,9 +119,9 @@ def get_eligible_experiments(boc, cre_lines, targeted_structures, stimuli):
         One row per eligible ophys experiment session.
     """
     experiments = boc.get_ophys_experiments(
-        cre_lines=cre_lines,
-        targeted_structures=targeted_structures,
-        stimuli=stimuli,
+        cre_lines=list(cre_lines),
+        targeted_structures=list(targeted_structures),
+        stimuli=list(stimuli),
     )
 
     return pd.DataFrame(experiments)
@@ -173,12 +180,6 @@ if __name__ == "__main__":
     # Quick manual test for the project research question.
 
     boc = get_boc()
-
-    experiments = get_eligible_experiments(
-        boc=boc,
-        cre_lines=["Rorb-IRES2-Cre"],
-        targeted_structures=["VISp", "VISal", "VISpm"],
-        stimuli=["drifting_gratings"],
-    )
+    experiments = get_eligible_experiments(boc=boc)
 
     summarize_eligible_experiments(experiments)

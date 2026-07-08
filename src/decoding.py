@@ -20,8 +20,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import confusion_matrix
 
+from config import DECODER_TYPE, N_SPLITS, RANDOM_STATE
 
-def get_classifier(decoder_type="logistic_regression"):
+
+def get_classifier(decoder_type=DECODER_TYPE):
     """
     Build an unfitted classifier pipeline.
 
@@ -64,12 +66,31 @@ def get_effective_n_splits(labels, requested_n_splits):
     return min(requested_n_splits, min_class_count)
 
 
+def _build_cv_and_clf(labels, decoder_type, n_splits, random_state):
+    """
+    Shared setup used by both decode_orientation and get_confusion_matrix:
+    builds the (unfitted) classifier pipeline and the StratifiedKFold
+    splitter, with n_splits reduced automatically if needed.
+    """
+    n_splits_eff = get_effective_n_splits(labels, n_splits)
+
+    clf = get_classifier(decoder_type)
+
+    cv = StratifiedKFold(
+        n_splits=n_splits_eff,
+        shuffle=True,
+        random_state=random_state,
+    )
+
+    return clf, cv
+
+
 def decode_orientation(
     activity,
     orientation,
-    decoder_type="logistic_regression",
-    n_splits=5,
-    random_state=42,
+    decoder_type=DECODER_TYPE,
+    n_splits=N_SPLITS,
+    random_state=RANDOM_STATE,
 ):
     """
     Cross-validated decoding of orientation from population activity.
@@ -110,15 +131,7 @@ def decode_orientation(
     n_classes = len(np.unique(labels))
     chance_level = 1.0 / n_classes
 
-    n_splits_eff = get_effective_n_splits(labels, n_splits)
-
-    clf = get_classifier(decoder_type)
-
-    cv = StratifiedKFold(
-        n_splits=n_splits_eff,
-        shuffle=True,
-        random_state=random_state,
-    )
+    clf, cv = _build_cv_and_clf(labels, decoder_type, n_splits, random_state)
 
     fold_accuracies = cross_val_score(
         clf,
@@ -136,9 +149,9 @@ def decode_orientation(
 def get_confusion_matrix(
     activity,
     orientation,
-    decoder_type="logistic_regression",
-    n_splits=5,
-    random_state=42,
+    decoder_type=DECODER_TYPE,
+    n_splits=N_SPLITS,
+    random_state=RANDOM_STATE,
 ):
     """
     Compute an out-of-fold confusion matrix for one session.
@@ -175,15 +188,7 @@ def get_confusion_matrix(
     labels = np.asarray(orientation)
     unique_labels = np.sort(np.unique(labels))
 
-    n_splits_eff = get_effective_n_splits(labels, n_splits)
-
-    clf = get_classifier(decoder_type)
-
-    cv = StratifiedKFold(
-        n_splits=n_splits_eff,
-        shuffle=True,
-        random_state=random_state,
-    )
+    clf, cv = _build_cv_and_clf(labels, decoder_type, n_splits, random_state)
 
     predicted = cross_val_predict(
         clf,

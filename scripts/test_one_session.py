@@ -4,12 +4,7 @@ from src.preprocessing import compute_trial_responses, get_stimulus_trials
 
 boc = get_boc()
 
-experiments = get_eligible_experiments(
-    boc=boc,
-    cre_lines=["Rorb-IRES2-Cre"],
-    targeted_structures=["VISp", "VISal", "VISpm"],
-    stimuli=["drifting_gratings"],
-)
+experiments = get_eligible_experiments(boc=boc)
 
 session_id = experiments.iloc[0]["id"]
 print(f"Testing session: {session_id}")

@@ -23,6 +23,7 @@ from src.preprocessing import (
 )
 
 from src.decoding import decode_orientation
+from config import RESULTS_DIR, DECODER_TYPE, N_SPLITS, RANDOM_STATE
 
 
 def interpret_score(mean_acc, chance):
@@ -60,9 +61,9 @@ def run_one_session(boc, row):
     mean_acc, chance, fold_acc = decode_orientation(
         activity_stim,
         labels_stim,
-        decoder_type="logistic_regression",
-        n_splits=5,
-        random_state=42,
+        decoder_type=DECODER_TYPE,
+        n_splits=N_SPLITS,
+        random_state=RANDOM_STATE,
     )
 
     interpretation = interpret_score(mean_acc, chance)
@@ -94,16 +95,11 @@ def run_one_session(boc, row):
 
 
 def main():
-    os.makedirs("results", exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
 
     boc = get_boc()
 
-    experiments = get_eligible_experiments(
-        boc=boc,
-        cre_lines=["Rorb-IRES2-Cre"],
-        targeted_structures=["VISp", "VISal", "VISpm"],
-        stimuli=["drifting_gratings"],
-    )
+    experiments = get_eligible_experiments(boc=boc)
 
     print(f"\nFound {len(experiments)} eligible sessions.")
 
@@ -135,7 +131,7 @@ def main():
 
     results_df = pd.DataFrame(results)
 
-    output_path = "results/session_level_results.csv"
+    output_path = os.path.join(RESULTS_DIR, "session_level_results.csv")
     results_df.to_csv(output_path, index=False)
 
     print("\n" + "=" * 70)

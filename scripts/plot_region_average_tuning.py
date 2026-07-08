@@ -25,9 +25,7 @@ from src.preprocessing import (
     get_stimulus_trials,
 )
 
-FIGURES_DIR = "figures"
-RESULTS_DIR = "results"
-ORIENTATIONS = np.array([0, 45, 90, 135, 180, 225, 270, 315])
+from config import FIGURES_DIR, RESULTS_DIR, ORIENTATIONS
 
 
 def compute_population_tuning(activity, labels):
@@ -62,12 +60,7 @@ def build_session_tuning_table():
     """
     boc = get_boc()
 
-    experiments = get_eligible_experiments(
-        boc=boc,
-        cre_lines=["Rorb-IRES2-Cre"],
-        targeted_structures=["VISp", "VISal", "VISpm"],
-        stimuli=["drifting_gratings"],
-    )
+    experiments = get_eligible_experiments(boc=boc)
 
     print(f"Found {len(experiments)} eligible sessions.")
 

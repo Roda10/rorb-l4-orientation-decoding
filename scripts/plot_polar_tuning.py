@@ -12,11 +12,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from config import RESULTS_DIR, FIGURES_DIR, ORIENTATIONS
 
-RESULTS_PATH = "results/region_tuning_curves.csv"
-FIGURES_DIR = "figures"
-
-ORIENTATIONS = np.array([0, 45, 90, 135, 180, 225, 270, 315])
+RESULTS_PATH = os.path.join(RESULTS_DIR, "region_tuning_curves.csv")
 
 
 def plot_polar_tuning():

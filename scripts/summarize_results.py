@@ -8,9 +8,9 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from config import RESULTS_DIR, FIGURES_DIR
 
-RESULTS_PATH = "results/session_level_results.csv"
-FIGURES_DIR = "figures"
+RESULTS_PATH = os.path.join(RESULTS_DIR, "session_level_results.csv")
 
 
 def load_results():
@@ -130,7 +130,7 @@ def plot_accuracy_vs_neurons(results):
 
 def main():
     os.makedirs(FIGURES_DIR, exist_ok=True)
-    os.makedirs("results", exist_ok=True)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
 
     results = load_results()
 
@@ -138,7 +138,7 @@ def main():
     print(results)
 
     summary = summarize_by_region(results)
-    summary_path = "results/region_summary.csv"
+    summary_path = os.path.join(RESULTS_DIR, "region_summary.csv")
     summary.to_csv(summary_path, index=False)
 
     print("\nRegion-level summary:")

@@ -21,7 +21,7 @@ from src.preprocessing import (
     get_stimulus_trials,
 )
 
-FIGURES_DIR = "figures"
+from config import FIGURES_DIR, TARGETED_STRUCTURES, ORIENTATIONS
 
 
 def compute_population_tuning(activity, labels):
@@ -107,7 +107,7 @@ def plot_combined_tuning_curves(curves_by_region):
             label=f"{region} (session {session_id})",
         )
 
-    plt.xticks([0, 45, 90, 135, 180, 225, 270, 315])
+    plt.xticks(ORIENTATIONS)
     plt.xlabel("Grating orientation / direction (degrees)")
     plt.ylabel("Mean population dF/F response")
     plt.title("Population tuning curves across cortical regions")
@@ -126,17 +126,11 @@ def run_one_example_per_region():
 
     boc = get_boc()
 
-    experiments = get_eligible_experiments(
-        boc=boc,
-        cre_lines=["Rorb-IRES2-Cre"],
-        targeted_structures=["VISp", "VISal", "VISpm"],
-        stimuli=["drifting_gratings"],
-    )
+    experiments = get_eligible_experiments(boc=boc)
 
-    regions = ["VISp", "VISal", "VISpm"]
     curves_by_region = {}
 
-    for region in regions:
+    for region in TARGETED_STRUCTURES:
         sub = experiments[experiments["targeted_structure"] == region]
 
         if sub.empty:
