@@ -19,6 +19,17 @@ ORIENTATIONS = np.array([0, 45, 90, 135, 180, 225, 270, 315])
 N_SPLITS = 5
 RANDOM_STATE = 42
 DECODER_TYPE = "logistic_regression"
+AVAILABLE_DECODERS = [
+    "logistic_regression",
+    "svm",
+    "random_forest",
+    "knn",
+    "lda",
+    "mlp",
+]
+
+# --- Raster plot defaults ----------------------------------------------------
+RASTER_N_NEURONS = 50
 
 # --- I/O paths ---------------------------------------------------------------
 RESULTS_DIR = "results"

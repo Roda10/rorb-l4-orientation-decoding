@@ -15,35 +15,64 @@ import numpy as np
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_val_predict
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import confusion_matrix
 
-from config import DECODER_TYPE, N_SPLITS, RANDOM_STATE
+from config import DECODER_TYPE, N_SPLITS, RANDOM_STATE, AVAILABLE_DECODERS
 
 
-def get_classifier(decoder_type=DECODER_TYPE):
+def _build_estimator(decoder_type, random_state):
+    """
+    Instantiate the raw (unfitted) estimator for a given decoder_type.
+    Random state is only passed to estimators that accept it.
+    """
+    if decoder_type == "logistic_regression":
+        return LogisticRegression(max_iter=1000, random_state=random_state)
+
+    if decoder_type == "svm":
+        return LinearSVC(max_iter=5000, random_state=random_state)
+
+    if decoder_type == "random_forest":
+        return RandomForestClassifier(n_estimators=200, random_state=random_state)
+
+    if decoder_type == "knn":
+        return KNeighborsClassifier(n_neighbors=5)
+
+    if decoder_type == "lda":
+        return LinearDiscriminantAnalysis()
+
+    if decoder_type == "mlp":
+        return MLPClassifier(
+            hidden_layer_sizes=(100,),
+            max_iter=1000,
+            random_state=random_state,
+        )
+
+    raise ValueError(
+        f"Unknown decoder_type: {decoder_type!r}. "
+        f"Available options: {AVAILABLE_DECODERS}"
+    )
+
+
+def get_classifier(decoder_type=DECODER_TYPE, random_state=RANDOM_STATE):
     """
     Build an unfitted classifier pipeline.
 
     StandardScaler is included inside the pipeline so that, during
     cross-validation, the scaler is fit only on the training trials
-    of each fold.
+    of each fold. Harmless for tree/neighbor-based models, required
+    for logistic regression, SVM, and MLP.
+
+    decoder_type : one of AVAILABLE_DECODERS
+        "logistic_regression", "svm", "random_forest", "knn", "lda", "mlp"
     """
-    if decoder_type == "logistic_regression":
-        clf = LogisticRegression(
-            max_iter=1000,
-        )
-
-    elif decoder_type == "svm":
-        clf = LinearSVC(
-            max_iter=5000,
-        )
-
-    else:
-        raise ValueError(f"Unknown decoder_type: {decoder_type}")
-
+    clf = _build_estimator(decoder_type, random_state)
     return make_pipeline(StandardScaler(), clf)
 
 
@@ -74,7 +103,7 @@ def _build_cv_and_clf(labels, decoder_type, n_splits, random_state):
     """
     n_splits_eff = get_effective_n_splits(labels, n_splits)
 
-    clf = get_classifier(decoder_type)
+    clf = get_classifier(decoder_type, random_state=random_state)
 
     cv = StratifiedKFold(
         n_splits=n_splits_eff,
