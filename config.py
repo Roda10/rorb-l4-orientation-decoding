@@ -11,6 +11,7 @@ import numpy as np
 CRE_LINES = ["Rorb-IRES2-Cre"]
 TARGETED_STRUCTURES = ["VISp", "VISal", "VISpm"]
 STIMULUS = "drifting_gratings"
+# STIMULUS = "natural_scenes"
 
 # --- Stimulus space ---------------------------------------------------------
 ORIENTATIONS = np.array([0, 45, 90, 135, 180, 225, 270, 315])

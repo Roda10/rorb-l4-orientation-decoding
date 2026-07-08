@@ -23,7 +23,7 @@ from src.preprocessing import (
 )
 
 from src.decoding import decode_orientation
-from config import RESULTS_DIR, DECODER_TYPE, N_SPLITS, RANDOM_STATE
+from config import RESULTS_DIR, DECODER_TYPE, N_SPLITS, RANDOM_STATE, STIMULUS
 
 
 def interpret_score(mean_acc, chance):
@@ -53,7 +53,7 @@ def run_one_session(boc, row):
     data_set = load_session_data(boc, session_id)
 
     timestamps, dff = data_set.get_dff_traces()
-    stim_table = data_set.get_stimulus_table("drifting_gratings")
+    stim_table = data_set.get_stimulus_table(STIMULUS)
 
     activity, labels = compute_trial_responses(dff, stim_table)
     activity_stim, labels_stim = get_stimulus_trials(activity, labels)
