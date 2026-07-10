@@ -13,7 +13,6 @@ This keeps train/test cleanly separated and avoids data leakage.
 
 import numpy as np
 
-from sklearn.linear_model import LogisticRegression
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
@@ -27,13 +26,93 @@ from sklearn.metrics import confusion_matrix
 from config import DECODER_TYPE, N_SPLITS, RANDOM_STATE, AVAILABLE_DECODERS
 
 
+class CustomLogisticRegression:
+    """Multinomial logistic regression implemented from scratch with gradient descent."""
+
+    def __init__(self, learning_rate=0.05, n_iter=3000, random_state=None, l2=1e-4):
+        self.learning_rate = learning_rate
+        self.n_iter = n_iter
+        self.random_state = random_state
+        self.l2 = l2
+        self.classes_ = None
+        self.coef_ = None
+        self.intercept_ = None
+        self.feature_mean_ = None
+        self.feature_scale_ = None
+        self.rng = np.random.default_rng(random_state)
+
+    def _standardize(self, X):
+        X = np.asarray(X, dtype=float)
+        if self.feature_mean_ is None or self.feature_scale_ is None:
+            raise ValueError("The model must be fitted before calling this method.")
+        return (X - self.feature_mean_) / self.feature_scale_
+
+    def _softmax(self, logits):
+        shifted = logits - logits.max(axis=1, keepdims=True)
+        exp_logits = np.exp(shifted)
+        return exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y)
+
+        if X.ndim == 1:
+            X = X.reshape(-1, 1)
+
+        self.feature_mean_ = X.mean(axis=0)
+        self.feature_scale_ = X.std(axis=0)
+        self.feature_scale_[self.feature_scale_ < 1e-8] = 1.0
+
+        X_scaled = self._standardize(X)
+        self.classes_ = np.unique(y)
+        class_to_index = {label: idx for idx, label in enumerate(self.classes_)}
+        y_indices = np.array([class_to_index[label] for label in y])
+        y_one_hot = np.eye(len(self.classes_))[y_indices]
+
+        n_samples, n_features = X_scaled.shape
+        n_classes = len(self.classes_)
+
+        self.coef_ = self.rng.normal(0.0, 0.01, size=(n_features, n_classes))
+        self.intercept_ = np.zeros(n_classes)
+
+        for _ in range(self.n_iter):
+            logits = X_scaled @ self.coef_ + self.intercept_
+            probs = self._softmax(logits)
+            error = probs - y_one_hot
+
+            gradient_w = (X_scaled.T @ error) / n_samples + self.l2 * self.coef_
+            gradient_b = error.mean(axis=0)
+
+            self.coef_ -= self.learning_rate * gradient_w
+            self.intercept_ -= self.learning_rate * gradient_b
+
+        return self
+
+    def predict_proba(self, X):
+        X_scaled = self._standardize(X)
+        logits = X_scaled @ self.coef_ + self.intercept_
+        return self._softmax(logits)
+
+    def predict(self, X):
+        probabilities = self.predict_proba(X)
+        return self.classes_[np.argmax(probabilities, axis=1)]
+
+    def decision_function(self, X):
+        X_scaled = self._standardize(X)
+        return X_scaled @ self.coef_ + self.intercept_
+
+
 def _build_estimator(decoder_type, random_state):
     """
     Instantiate the raw (unfitted) estimator for a given decoder_type.
     Random state is only passed to estimators that accept it.
     """
     if decoder_type == "logistic_regression":
-        return LogisticRegression(max_iter=1000, random_state=random_state)
+        return CustomLogisticRegression(
+            learning_rate=0.05,
+            n_iter=3000,
+            random_state=random_state,
+        )
 
     if decoder_type == "svm":
         return LinearSVC(max_iter=5000, random_state=random_state)
@@ -62,17 +141,20 @@ def _build_estimator(decoder_type, random_state):
 
 def get_classifier(decoder_type=DECODER_TYPE, random_state=RANDOM_STATE):
     """
-    Build an unfitted classifier pipeline.
+    Build an unfitted classifier.
 
-    StandardScaler is included inside the pipeline so that, during
-    cross-validation, the scaler is fit only on the training trials
-    of each fold. Harmless for tree/neighbor-based models, required
-    for logistic regression, SVM, and MLP.
+    For the custom logistic regression implementation, feature scaling is
+    handled internally so that each cross-validation fold is fitted on its
+    own training data without leaking information from the test fold.
+    For the other decoder types, a simple pipeline with StandardScaler is
+    used to keep the interface consistent.
 
     decoder_type : one of AVAILABLE_DECODERS
         "logistic_regression", "svm", "random_forest", "knn", "lda", "mlp"
     """
     clf = _build_estimator(decoder_type, random_state)
+    if decoder_type == "logistic_regression":
+        return clf
     return make_pipeline(StandardScaler(), clf)
 
 

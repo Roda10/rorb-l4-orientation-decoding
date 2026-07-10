@@ -24,7 +24,7 @@ def get_cache_dir():
     The function tries to support:
     - AWS / Colab environments
     - macOS with an external TReND2026 drive
-    - Windows with an external drive mounted as E:/
+    - Windows with an external drive mounted as D:/
     - Linux using an environment variable or a default mounted path
     """
     platstring = platform.platform()
