@@ -29,5 +29,9 @@ RASTER_N_NEURONS = 10
 RESULTS_DIR = "results"
 FIGURES_DIR = "figures"
 
-# --- Session of interest -----------------------------------------------------
-SESSION_OF_INTEREST = 505695962
+# --- Fixed sessions (one per region, highest neuron count) ------------------
+SESSIONS_BY_REGION = {
+    "VISp":  510214538, #531348161,
+    "VISpm": 551888519,
+    "VISal": 505695962, #591460070,
+}

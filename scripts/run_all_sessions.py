@@ -1,8 +1,10 @@
 """
 run_all_sessions.py
 
-Run orientation decoding for every eligible RORB Layer 4 session
-across VISp, VISal, and VISpm using L1 logistic regression.
+Run orientation decoding for one fixed session per region
+(VISp, VISal, VISpm) using L1 logistic regression. Each region's
+session is the one with the highest neuron count, chosen ahead of
+time and stored in config.SESSIONS_BY_REGION.
 
 Outputs
 -------
@@ -17,17 +19,17 @@ import numpy as np
 import pandas as pd
 
 from config import (
+    CRE_LINES,
     DECODER_TYPE,
     N_SPLITS,
     RANDOM_STATE,
     RESULTS_DIR,
-    SESSION_OF_INTEREST,
+    SESSIONS_BY_REGION,
     STIMULUS,
 )
 
 from src.data_access import (
     get_boc,
-    get_eligible_experiments,
     load_session_data,
 )
 
@@ -215,19 +217,6 @@ def save_neuron_importance(
     )
 
     return output_path
-
-
-def run_one_session(boc, row):
-    """
-    Run decoding for one ophys session represented by one row.
-    """
-    session_id = row["id"]
-
-    return run_single_session(
-        session_id=session_id,
-        boc=boc,
-        row=row,
-    )
 
 
 def run_single_session(
@@ -549,7 +538,8 @@ def run_single_session(
 
 def run_all_sessions():
     """
-    Run decoding for every eligible session and save results.
+    Run decoding for the fixed, one-per-region sessions in
+    config.SESSIONS_BY_REGION and save results.
     """
     os.makedirs(
         RESULTS_DIR,
@@ -558,60 +548,46 @@ def run_all_sessions():
 
     boc = get_boc()
 
-    experiments = get_eligible_experiments(
-        boc=boc
-    )
-
     print(
-        f"\nFound {len(experiments)} "
-        "eligible sessions."
+        f"\nRunning {len(SESSIONS_BY_REGION)} "
+        "fixed sessions (one per region)."
     )
 
     results = []
 
-    for _, row in experiments.iterrows():
+    for region, session_id in SESSIONS_BY_REGION.items():
+        row = {
+            "experiment_container_id": None,
+            "targeted_structure": region,
+            "cre_line": CRE_LINES[0],
+            "imaging_depth": None,
+            "session_type": None,
+        }
+
         try:
-            result = run_one_session(
-                boc,
-                row,
+            result = run_single_session(
+                session_id=session_id,
+                boc=boc,
+                row=row,
             )
 
             results.append(result)
 
         except Exception as error:
             print(
-                f"\nERROR in session {row['id']} "
-                f"with {DECODER_TYPE}: {error}"
+                f"\nERROR in session {session_id} "
+                f"({region}) with {DECODER_TYPE}: {error}"
             )
 
             results.append(
                 {
-                    "session_id": row["id"],
+                    "session_id": session_id,
 
-                    "experiment_container_id": row.get(
-                        "experiment_container_id",
-                        None,
-                    ),
-
-                    "targeted_structure": row.get(
-                        "targeted_structure",
-                        None,
-                    ),
-
-                    "cre_line": row.get(
-                        "cre_line",
-                        None,
-                    ),
-
-                    "imaging_depth": row.get(
-                        "imaging_depth",
-                        None,
-                    ),
-
-                    "session_type": row.get(
-                        "session_type",
-                        None,
-                    ),
+                    "experiment_container_id": None,
+                    "targeted_structure": region,
+                    "cre_line": CRE_LINES[0],
+                    "imaging_depth": None,
+                    "session_type": None,
 
                     "model": DECODER_TYPE,
                     "penalty": "l1",
@@ -713,67 +689,18 @@ def run_all_sessions():
         )
     )
 
-    # ---------------------------------------------------------
-    # Show largest-neuron session per region
-    # ---------------------------------------------------------
-    selected_sessions = (
-        successful_results
-        .sort_values(
-            "n_neurons",
-            ascending=False,
-        )
-        .groupby(
-            "targeted_structure",
-            as_index=False,
-        )
-        .first()
-    )
-
-    print(
-        "\nSelected largest-neuron session "
-        "for each region:"
-    )
-
-    print(
-        selected_sessions[
-            [
-                "targeted_structure",
-                "session_id",
-                "n_neurons",
-                "mean_cv_accuracy",
-            ]
-        ]
-    )
-
-    selected_output_path = os.path.join(
-        RESULTS_DIR,
-        "selected_sessions_by_region.csv",
-    )
-
-    selected_sessions.to_csv(
-        selected_output_path,
-        index=False,
-    )
-
-    print(
-        "\nSelected regional sessions saved to: "
-        f"{selected_output_path}"
-    )
-
 
 def main():
     """
-    Run every eligible session.
-
-    The largest-neuron session for each region will later be
-    selected automatically for the slide figures.
+    Run the fixed, one-per-region sessions defined in
+    config.SESSIONS_BY_REGION.
     """
     run_all_sessions()
 
-    # To test only one configured session instead, use:
+    # To test only one region's session instead, use e.g.:
     #
     # run_single_session(
-    #     SESSION_OF_INTEREST
+    #     SESSIONS_BY_REGION["VISp"]
     # )
 
 
