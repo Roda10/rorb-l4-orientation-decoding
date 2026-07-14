@@ -3,169 +3,102 @@ decoding.py
 
 Cross-validated decoding of grating orientation from population activity.
 
-Everything here happens WITHIN a single session:
-  - train/test splits are at the trial level using StratifiedKFold
-  - the neuron-wise scaler is fit on the training fold only
-  - no information is shared across train/test folds
-
-This keeps train/test cleanly separated and avoids data leakage.
+Everything happens within one session:
+  - train/test splits are performed at trial level
+  - scaling is fitted only on each training fold
+  - L1 logistic regression performs sparse neuron selection
+  - neuron importance is computed across cross-validation folds
 """
 
 import numpy as np
-
-from sklearn.svm import LinearSVC
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_val_predict
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import (
+    StratifiedKFold,
+    cross_val_predict,
+    cross_val_score,
+    cross_validate,
+)
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
-from config import DECODER_TYPE, N_SPLITS, RANDOM_STATE, AVAILABLE_DECODERS
-
-
-class CustomLogisticRegression:
-    """Multinomial logistic regression implemented from scratch with gradient descent."""
-
-    def __init__(self, learning_rate=0.05, n_iter=3000, random_state=None, l2=1e-4):
-        self.learning_rate = learning_rate
-        self.n_iter = n_iter
-        self.random_state = random_state
-        self.l2 = l2
-        self.classes_ = None
-        self.coef_ = None
-        self.intercept_ = None
-        self.feature_mean_ = None
-        self.feature_scale_ = None
-        self.rng = np.random.default_rng(random_state)
-
-    def _standardize(self, X):
-        X = np.asarray(X, dtype=float)
-        if self.feature_mean_ is None or self.feature_scale_ is None:
-            raise ValueError("The model must be fitted before calling this method.")
-        return (X - self.feature_mean_) / self.feature_scale_
-
-    def _softmax(self, logits):
-        shifted = logits - logits.max(axis=1, keepdims=True)
-        exp_logits = np.exp(shifted)
-        return exp_logits / exp_logits.sum(axis=1, keepdims=True)
-
-    def fit(self, X, y):
-        X = np.asarray(X, dtype=float)
-        y = np.asarray(y)
-
-        if X.ndim == 1:
-            X = X.reshape(-1, 1)
-
-        self.feature_mean_ = X.mean(axis=0)
-        self.feature_scale_ = X.std(axis=0)
-        self.feature_scale_[self.feature_scale_ < 1e-8] = 1.0
-
-        X_scaled = self._standardize(X)
-        self.classes_ = np.unique(y)
-        class_to_index = {label: idx for idx, label in enumerate(self.classes_)}
-        y_indices = np.array([class_to_index[label] for label in y])
-        y_one_hot = np.eye(len(self.classes_))[y_indices]
-
-        n_samples, n_features = X_scaled.shape
-        n_classes = len(self.classes_)
-
-        self.coef_ = self.rng.normal(0.0, 0.01, size=(n_features, n_classes))
-        self.intercept_ = np.zeros(n_classes)
-
-        for _ in range(self.n_iter):
-            logits = X_scaled @ self.coef_ + self.intercept_
-            probs = self._softmax(logits)
-            error = probs - y_one_hot
-
-            gradient_w = (X_scaled.T @ error) / n_samples + self.l2 * self.coef_
-            gradient_b = error.mean(axis=0)
-
-            self.coef_ -= self.learning_rate * gradient_w
-            self.intercept_ -= self.learning_rate * gradient_b
-
-        return self
-
-    def predict_proba(self, X):
-        X_scaled = self._standardize(X)
-        logits = X_scaled @ self.coef_ + self.intercept_
-        return self._softmax(logits)
-
-    def predict(self, X):
-        probabilities = self.predict_proba(X)
-        return self.classes_[np.argmax(probabilities, axis=1)]
-
-    def decision_function(self, X):
-        X_scaled = self._standardize(X)
-        return X_scaled @ self.coef_ + self.intercept_
+from config import DECODER_TYPE, N_SPLITS, RANDOM_STATE
 
 
-def _build_estimator(decoder_type, random_state):
+def _build_estimator(random_state, c_value=0.1):
     """
-    Instantiate the raw (unfitted) estimator for a given decoder_type.
-    Random state is only passed to estimators that accept it.
+    Build an L1-regularized multinomial logistic regression pipeline.
+
+    Parameters
+    ----------
+    random_state : int
+        Random seed.
+
+    c_value : float
+        Inverse regularization strength.
+
+        Smaller C:
+            stronger L1 regularization
+            fewer selected neurons
+
+        Larger C:
+            weaker L1 regularization
+            more selected neurons
     """
-    if decoder_type == "logistic_regression":
-        return CustomLogisticRegression(
-            learning_rate=0.05,
-            n_iter=3000,
-            random_state=random_state,
-        )
-
-    if decoder_type == "svm":
-        return LinearSVC(max_iter=5000, random_state=random_state)
-
-    if decoder_type == "random_forest":
-        return RandomForestClassifier(n_estimators=200, random_state=random_state)
-
-    if decoder_type == "knn":
-        return KNeighborsClassifier(n_neighbors=5)
-
-    if decoder_type == "lda":
-        return LinearDiscriminantAnalysis()
-
-    if decoder_type == "mlp":
-        return MLPClassifier(
-            hidden_layer_sizes=(100,),
-            max_iter=1000,
-            random_state=random_state,
-        )
-
-    raise ValueError(
-        f"Unknown decoder_type: {decoder_type!r}. "
-        f"Available options: {AVAILABLE_DECODERS}"
+    return Pipeline(
+        steps=[
+            (
+                "scaler",
+                StandardScaler(),
+            ),
+            (
+                "classifier",
+                LogisticRegression(
+                    penalty="l1",
+                    solver="saga",
+                    C=c_value,
+                    max_iter=10000,
+                    random_state=random_state,
+                ),
+            ),
+        ]
     )
 
 
-def get_classifier(decoder_type=DECODER_TYPE, random_state=RANDOM_STATE):
-    """
-    Build an unfitted classifier.
+def get_classifier(
+    decoder_type=DECODER_TYPE,
+    random_state=RANDOM_STATE,
+    c_value=0.1,
+):
+    """Build an unfitted classifier."""
+    if decoder_type != "logistic_regression":
+        raise ValueError(
+            "Only 'logistic_regression' is supported."
+        )
 
-    For the custom logistic regression implementation, feature scaling is
-    handled internally so that each cross-validation fold is fitted on its
-    own training data without leaking information from the test fold.
-    For the other decoder types, a simple pipeline with StandardScaler is
-    used to keep the interface consistent.
-
-    decoder_type : one of AVAILABLE_DECODERS
-        "logistic_regression", "svm", "random_forest", "knn", "lda", "mlp"
-    """
-    clf = _build_estimator(decoder_type, random_state)
-    if decoder_type == "logistic_regression":
-        return clf
-    return make_pipeline(StandardScaler(), clf)
+    return _build_estimator(
+        random_state=random_state,
+        c_value=c_value,
+    )
 
 
-def get_effective_n_splits(labels, requested_n_splits):
+def get_effective_n_splits(
+    labels,
+    requested_n_splits,
+):
     """
     Choose a valid number of cross-validation folds.
 
-    StratifiedKFold requires each class to have at least n_splits trials.
-    Therefore, n_splits cannot be larger than the smallest class count.
+    StratifiedKFold requires each class to contain at least
+    n_splits observations.
     """
-    _, counts = np.unique(labels, return_counts=True)
+    labels = np.asarray(labels)
+
+    _, counts = np.unique(
+        labels,
+        return_counts=True,
+    )
+
     min_class_count = counts.min()
 
     if min_class_count < 2:
@@ -174,18 +107,74 @@ def get_effective_n_splits(labels, requested_n_splits):
             "Cross-validation is not possible."
         )
 
-    return min(requested_n_splits, min_class_count)
+    return min(
+        requested_n_splits,
+        min_class_count,
+    )
 
 
-def _build_cv_and_clf(labels, decoder_type, n_splits, random_state):
+def _validate_inputs(activity, orientation):
+    """Validate activity matrix and orientation labels."""
+    activity = np.asarray(
+        activity,
+        dtype=float,
+    )
+
+    labels = np.asarray(orientation)
+
+    if activity.ndim != 2:
+        raise ValueError(
+            "activity must have shape "
+            "(n_trials, n_neurons)."
+        )
+
+    if labels.ndim != 1:
+        labels = labels.ravel()
+
+    if activity.shape[0] != labels.shape[0]:
+        raise ValueError(
+            "activity and orientation must contain "
+            "the same number of trials."
+        )
+
+    if activity.shape[0] == 0:
+        raise ValueError(
+            "activity cannot be empty."
+        )
+
+    if not np.all(np.isfinite(activity)):
+        raise ValueError(
+            "activity contains NaN or infinite values."
+        )
+
+    if len(np.unique(labels)) < 2:
+        raise ValueError(
+            "At least two orientation classes are required."
+        )
+
+    return activity, labels
+
+
+def _build_cv_and_clf(
+    labels,
+    decoder_type,
+    n_splits,
+    random_state,
+    c_value=0.1,
+):
     """
-    Shared setup used by both decode_orientation and get_confusion_matrix:
-    builds the (unfitted) classifier pipeline and the StratifiedKFold
-    splitter, with n_splits reduced automatically if needed.
+    Build the classifier and StratifiedKFold splitter.
     """
-    n_splits_eff = get_effective_n_splits(labels, n_splits)
+    n_splits_eff = get_effective_n_splits(
+        labels,
+        n_splits,
+    )
 
-    clf = get_classifier(decoder_type, random_state=random_state)
+    classifier = get_classifier(
+        decoder_type=decoder_type,
+        random_state=random_state,
+        c_value=c_value,
+    )
 
     cv = StratifiedKFold(
         n_splits=n_splits_eff,
@@ -193,7 +182,7 @@ def _build_cv_and_clf(labels, decoder_type, n_splits, random_state):
         random_state=random_state,
     )
 
-    return clf, cv
+    return classifier, cv
 
 
 def decode_orientation(
@@ -202,59 +191,75 @@ def decode_orientation(
     decoder_type=DECODER_TYPE,
     n_splits=N_SPLITS,
     random_state=RANDOM_STATE,
+    c_value=0.1,
 ):
     """
-    Cross-validated decoding of orientation from population activity.
+    Cross-validated orientation decoding.
 
     Parameters
     ----------
     activity : np.ndarray, shape (n_trials, n_neurons)
-        Trial-level population responses.
+        Population activity for each trial.
 
     orientation : np.ndarray, shape (n_trials,)
-        Orientation label per trial:
-        0, 45, 90, 135, 180, 225, 270, or 315 degrees.
+        Orientation label for each trial.
 
     decoder_type : str
-        "logistic_regression" or "svm".
+        Currently only "logistic_regression" is supported.
 
     n_splits : int
         Requested number of cross-validation folds.
-        Automatically reduced if the smallest class has fewer trials.
 
     random_state : int
-        Seed for reproducible CV splits.
+        Random seed.
+
+    c_value : float
+        Inverse L1 regularization strength.
 
     Returns
     -------
     mean_cv_accuracy : float
-        Mean classification accuracy across held-out test folds.
+        Mean test accuracy across folds.
 
     chance_level : float
-        1 / number of classes.
-        For 8 balanced classes, chance level is 1/8 = 0.125.
+        Chance level equal to 1 / number of classes.
 
     fold_accuracies : np.ndarray
-        Accuracy for each fold.
+        Accuracy for every fold.
     """
-    labels = np.asarray(orientation)
+    activity, labels = _validate_inputs(
+        activity,
+        orientation,
+    )
 
     n_classes = len(np.unique(labels))
     chance_level = 1.0 / n_classes
 
-    clf, cv = _build_cv_and_clf(labels, decoder_type, n_splits, random_state)
+    classifier, cv = _build_cv_and_clf(
+        labels=labels,
+        decoder_type=decoder_type,
+        n_splits=n_splits,
+        random_state=random_state,
+        c_value=c_value,
+    )
 
     fold_accuracies = cross_val_score(
-        clf,
-        activity,
-        labels,
+        estimator=classifier,
+        X=activity,
+        y=labels,
         cv=cv,
         scoring="accuracy",
     )
 
-    mean_cv_accuracy = fold_accuracies.mean()
+    mean_cv_accuracy = float(
+        np.mean(fold_accuracies)
+    )
 
-    return mean_cv_accuracy, chance_level, fold_accuracies
+    return (
+        mean_cv_accuracy,
+        chance_level,
+        fold_accuracies,
+    )
 
 
 def get_confusion_matrix(
@@ -263,56 +268,296 @@ def get_confusion_matrix(
     decoder_type=DECODER_TYPE,
     n_splits=N_SPLITS,
     random_state=RANDOM_STATE,
+    c_value=0.1,
 ):
     """
-    Compute an out-of-fold confusion matrix for one session.
+    Compute an out-of-fold confusion matrix.
 
-    The predictions are generated using cross-validation, so every
-    prediction is made on a held-out trial.
-
-    Parameters
-    ----------
-    activity : np.ndarray, shape (n_trials, n_neurons)
-        Trial-level population responses.
-
-    orientation : np.ndarray, shape (n_trials,)
-        Orientation label per trial.
-
-    decoder_type : str
-        "logistic_regression" or "svm".
-
-    n_splits : int
-        Requested number of cross-validation folds.
-
-    random_state : int
-        Seed for reproducible CV splits.
-
-    Returns
-    -------
-    cm : np.ndarray, shape (n_classes, n_classes)
-        Row-normalized confusion matrix.
-        Rows are true labels, columns are predicted labels.
-
-    labels : np.ndarray
-        Sorted orientation labels corresponding to rows/columns.
+    Every prediction is generated from a model that did not train
+    on the corresponding trial.
     """
-    labels = np.asarray(orientation)
-    unique_labels = np.sort(np.unique(labels))
-
-    clf, cv = _build_cv_and_clf(labels, decoder_type, n_splits, random_state)
-
-    predicted = cross_val_predict(
-        clf,
+    activity, labels = _validate_inputs(
         activity,
-        labels,
+        orientation,
+    )
+
+    unique_labels = np.sort(
+        np.unique(labels)
+    )
+
+    classifier, cv = _build_cv_and_clf(
+        labels=labels,
+        decoder_type=decoder_type,
+        n_splits=n_splits,
+        random_state=random_state,
+        c_value=c_value,
+    )
+
+    predicted_labels = cross_val_predict(
+        estimator=classifier,
+        X=activity,
+        y=labels,
         cv=cv,
+        method="predict",
     )
 
     cm = confusion_matrix(
-        labels,
-        predicted,
+        y_true=labels,
+        y_pred=predicted_labels,
         labels=unique_labels,
         normalize="true",
     )
 
     return cm, unique_labels
+
+
+def get_neuron_importance(
+    activity,
+    orientation,
+    decoder_type=DECODER_TYPE,
+    n_splits=N_SPLITS,
+    random_state=RANDOM_STATE,
+    c_value=0.1,
+):
+    """
+    Estimate neuron importance across cross-validation folds.
+
+    Importance is based on the absolute logistic-regression
+    coefficients.
+
+    Returns
+    -------
+    results : dict
+
+        mean_importance:
+            Average absolute coefficient for each neuron.
+
+        std_importance:
+            Standard deviation across folds.
+
+        selection_frequency:
+            Fraction of folds in which a neuron has at least one
+            non-zero coefficient.
+
+        class_mean_coefficients:
+            Mean signed coefficient for every class and neuron.
+
+        ranking:
+            Neuron indices sorted from most to least important.
+
+        fold_accuracies:
+            Test accuracy for every fold.
+
+        selected_neurons:
+            Indices of neurons selected in at least one fold.
+    """
+    activity, labels = _validate_inputs(
+        activity,
+        orientation,
+    )
+
+    classifier, cv = _build_cv_and_clf(
+        labels=labels,
+        decoder_type=decoder_type,
+        n_splits=n_splits,
+        random_state=random_state,
+        c_value=c_value,
+    )
+
+    cv_results = cross_validate(
+        estimator=classifier,
+        X=activity,
+        y=labels,
+        cv=cv,
+        scoring="accuracy",
+        return_estimator=True,
+    )
+
+    fold_importances = []
+    fold_selection_masks = []
+    fold_coefficients = []
+
+    for fitted_pipeline in cv_results["estimator"]:
+        logistic_model = fitted_pipeline.named_steps[
+            "classifier"
+        ]
+
+        coefficients = logistic_model.coef_
+
+        # Shape:
+        # coefficients = (n_classes, n_neurons)
+        fold_coefficients.append(coefficients)
+
+        # One importance score per neuron.
+        neuron_importance = np.mean(
+            np.abs(coefficients),
+            axis=0,
+        )
+
+        fold_importances.append(
+            neuron_importance
+        )
+
+        # A neuron is selected when at least one class has
+        # a non-zero coefficient for that neuron.
+        selected_mask = np.any(
+            np.abs(coefficients) > 1e-8,
+            axis=0,
+        )
+
+        fold_selection_masks.append(
+            selected_mask
+        )
+
+    fold_importances = np.asarray(
+        fold_importances
+    )
+
+    fold_selection_masks = np.asarray(
+        fold_selection_masks
+    )
+
+    fold_coefficients = np.asarray(
+        fold_coefficients
+    )
+
+    mean_importance = np.mean(
+        fold_importances,
+        axis=0,
+    )
+
+    std_importance = np.std(
+        fold_importances,
+        axis=0,
+    )
+
+    selection_frequency = np.mean(
+        fold_selection_masks,
+        axis=0,
+    )
+
+    class_mean_coefficients = np.mean(
+        fold_coefficients,
+        axis=0,
+    )
+
+    ranking = np.argsort(
+        mean_importance
+    )[::-1]
+
+    selected_neurons = np.where(
+        selection_frequency > 0
+    )[0]
+
+    return {
+        "mean_importance": mean_importance,
+        "std_importance": std_importance,
+        "selection_frequency": selection_frequency,
+        "class_mean_coefficients": class_mean_coefficients,
+        "ranking": ranking,
+        "fold_accuracies": cv_results["test_score"],
+        "selected_neurons": selected_neurons,
+        "classes": np.sort(np.unique(labels)),
+        "c_value": c_value,
+    }
+
+
+def print_top_neurons(
+    importance_results,
+    top_n=20,
+):
+    """
+    Print the most important neurons.
+
+    Parameters
+    ----------
+    importance_results : dict
+        Output of get_neuron_importance().
+
+    top_n : int
+        Number of neurons to display.
+    """
+    ranking = importance_results["ranking"]
+    mean_importance = importance_results[
+        "mean_importance"
+    ]
+    std_importance = importance_results[
+        "std_importance"
+    ]
+    selection_frequency = importance_results[
+        "selection_frequency"
+    ]
+
+    top_n = min(
+        top_n,
+        len(ranking),
+    )
+
+    print("\nTop contributing neurons")
+    print("=" * 70)
+
+    for rank_position, neuron_index in enumerate(
+        ranking[:top_n],
+        start=1,
+    ):
+        print(
+            f"{rank_position:02d}. "
+            f"Neuron {neuron_index:04d} | "
+            f"importance={mean_importance[neuron_index]:.6f} | "
+            f"std={std_importance[neuron_index]:.6f} | "
+            f"selected={selection_frequency[neuron_index] * 100:.1f}%"
+        )
+
+
+def compare_regularization_strengths(
+    activity,
+    orientation,
+    c_values=(0.01, 0.05, 0.1, 0.5, 1.0),
+    decoder_type=DECODER_TYPE,
+    n_splits=N_SPLITS,
+    random_state=RANDOM_STATE,
+):
+    """
+    Compare different L1 regularization strengths.
+
+    Returns a list containing accuracy and selected-neuron counts
+    for every C value.
+    """
+    comparison_results = []
+
+    for c_value in c_values:
+        results = get_neuron_importance(
+            activity=activity,
+            orientation=orientation,
+            decoder_type=decoder_type,
+            n_splits=n_splits,
+            random_state=random_state,
+            c_value=c_value,
+        )
+
+        mean_accuracy = float(
+            np.mean(results["fold_accuracies"])
+        )
+
+        stable_selected_count = int(
+            np.sum(
+                results["selection_frequency"] >= 0.5
+            )
+        )
+
+        any_selected_count = int(
+            np.sum(
+                results["selection_frequency"] > 0
+            )
+        )
+
+        comparison_results.append(
+            {
+                "c_value": c_value,
+                "mean_accuracy": mean_accuracy,
+                "stable_selected_neurons": stable_selected_count,
+                "selected_in_any_fold": any_selected_count,
+            }
+        )
+
+    return comparison_results
