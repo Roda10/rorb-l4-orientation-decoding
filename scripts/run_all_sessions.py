@@ -144,9 +144,7 @@ def save_neuron_importance(
     output_path : str
         Saved CSV path.
     """
-    ranking = importance_results["ranking"]
     mean_importance = importance_results["mean_importance"]
-    std_importance = importance_results["std_importance"]
     selection_frequency = importance_results[
         "selection_frequency"
     ]
@@ -165,34 +163,18 @@ def save_neuron_importance(
             f"the number of neurons ({n_neurons})."
         )
 
-    rank_positions = np.empty(
-        n_neurons,
-        dtype=int,
-    )
-
-    rank_positions[ranking] = np.arange(
-        1,
-        n_neurons + 1,
-    )
-
     neuron_results = pd.DataFrame(
         {
             "session_id": session_id,
-            "neuron_index": np.arange(n_neurons),
             "cell_specimen_id": cell_ids,
-            "importance_rank": rank_positions,
             "mean_importance": mean_importance,
-            "std_importance": std_importance,
             "selection_frequency": selection_frequency,
-            "selected_any_fold": selection_frequency > 0,
-            "stable_selected": (
-                selection_frequency >= STABILITY_THRESHOLD
-            ),
         }
     )
 
     # Add one signed mean coefficient column
-    # for every orientation class.
+    # for every orientation class -- these are the actual
+    # L1 logistic regression weights, averaged across CV folds.
     for class_index, class_label in enumerate(classes):
         column_name = (
             f"coefficient_orientation_{class_label}"
@@ -203,7 +185,8 @@ def save_neuron_importance(
         )
 
     neuron_results = neuron_results.sort_values(
-        by="importance_rank",
+        by="mean_importance",
+        ascending=False,
     ).reset_index(drop=True)
 
     output_path = os.path.join(
@@ -375,6 +358,19 @@ def run_single_session(
         )
     )
 
+    # Nonzero-coefficient neuron count for each individual CV
+    # fold. This shows how much the "how many neurons does the
+    # model use" number varies across folds, rather than only
+    # reporting the single aggregated stable count.
+    fold_selection_masks = importance_results[
+        "fold_selection_masks"
+    ]
+
+    fold_selected_counts = np.sum(
+        fold_selection_masks,
+        axis=1,
+    )
+
     neuron_importance_path = save_neuron_importance(
         session_id=session_id,
         cell_ids=cell_ids,
@@ -518,6 +514,11 @@ def run_single_session(
             n_stable_selected
         ),
 
+        "fold_selected_counts": ",".join(
+            str(int(count))
+            for count in fold_selected_counts
+        ),
+
         "stability_threshold": (
             STABILITY_THRESHOLD
         ),
@@ -603,6 +604,7 @@ def run_all_sessions():
 
                     "n_selected_any_fold": None,
                     "n_stable_selected": None,
+                    "fold_selected_counts": None,
 
                     "stability_threshold": (
                         STABILITY_THRESHOLD
@@ -688,6 +690,8 @@ def run_all_sessions():
             ]
         )
     )
+
+
 
 
 def main():

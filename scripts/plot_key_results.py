@@ -22,6 +22,7 @@ audience:
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from config import RESULTS_DIR
@@ -140,30 +141,55 @@ def plot_nonzero_coefficient_neurons(results):
     Figure 2: how many neurons does the L1 model reliably use?
 
     L1 regularization sets the coefficient of uninformative neurons
-    to exactly zero. A neuron is counted here if its coefficient was
-    nonzero in at least half of the cross-validation folds
-    ("n_stable_selected") — i.e. the model reliably relies on it,
-    not just by chance in a single fold. Neurons outside this count
-    contributed nothing stable to the decision.
-
-    Comparing this stable count, against total recorded neurons,
-    shows whether a region needs a large or small working
-    subpopulation to represent orientation.
+    to exactly zero. The bar height is the number of neurons
+    reliably selected across cross-validation ("n_stable_selected"
+    -- nonzero coefficient in at least half of CV folds). The
+    error bar shows the min-to-max range of how many neurons had a
+    nonzero coefficient in any single fold ("fold_selected_counts"),
+    i.e. how much this number varies fold to fold before
+    aggregating -- since the bar itself is already an aggregate
+    across folds and would otherwise hide that variability.
     """
     regions = results["targeted_structure"].tolist()
     total_neurons = results["n_neurons"].tolist()
     stable = results["n_stable_selected"].tolist()
 
+    fold_counts = [
+        np.array([int(x) for x in str(values).split(",")])
+        for values in results["fold_selected_counts"]
+    ]
+
+    lower_error = [
+        stable_count - counts.min()
+        for stable_count, counts in zip(stable, fold_counts)
+    ]
+
+    upper_error = [
+        counts.max() - stable_count
+        for stable_count, counts in zip(stable, fold_counts)
+    ]
+
+    # Error bars cannot be negative -- if the stable count falls
+    # outside the fold min/max range, clip to zero on that side.
+    lower_error = [max(0, value) for value in lower_error]
+    upper_error = [max(0, value) for value in upper_error]
+
     fig, axis = plt.subplots(figsize=(7, 5.5))
 
-    bars = axis.bar(regions, stable, color="#4C72B0")
+    bars = axis.bar(
+        regions,
+        stable,
+        yerr=[lower_error, upper_error],
+        capsize=6,
+        color="#4C72B0",
+    )
 
     for bar, n_stable, total in zip(bars, stable, total_neurons):
         fraction = n_stable / total if total else 0
 
         axis.text(
             bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + max(total_neurons) * 0.02,
+            bar.get_height() + max(total_neurons) * 0.05,
             f"{int(n_stable)} / {int(total)}\n({fraction:.0%})",
             ha="center",
             fontsize=9,
@@ -174,14 +200,14 @@ def plot_nonzero_coefficient_neurons(results):
     axis.set_title(
         "How many neurons does the model reliably rely on?"
     )
-    axis.set_ylim(0, max(total_neurons) * 0.7)
+    axis.set_ylim(0, max(total_neurons) * 0.6)
 
     fig.text(
-        0.5, -0.03,
-        "L1 regularization sets uninformative neurons' coefficients to "
-        "exactly zero. Bars show neurons with a nonzero coefficient in "
-        "at least half of cross-validation folds, out of all recorded "
-        "neurons in that region.",
+        0.5, -0.05,
+        "Bars show neurons with a nonzero coefficient in at least half "
+        "of cross-validation folds, out of all recorded neurons. Error "
+        "bars show the min-to-max range of nonzero-coefficient neuron "
+        "counts across individual folds.",
         ha="center", fontsize=8, wrap=True,
     )
 

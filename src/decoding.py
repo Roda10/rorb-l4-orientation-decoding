@@ -350,6 +350,12 @@ def get_neuron_importance(
 
         selected_neurons:
             Indices of neurons selected in at least one fold.
+
+        fold_selection_masks:
+            Boolean array, shape (n_folds, n_neurons). True where
+            a neuron had a non-zero coefficient in that fold. Used
+            to compute how the nonzero-neuron count varies across
+            CV folds.
     """
     activity, labels = _validate_inputs(
         activity,
@@ -459,6 +465,7 @@ def get_neuron_importance(
         "selected_neurons": selected_neurons,
         "classes": np.sort(np.unique(labels)),
         "c_value": c_value,
+        "fold_selection_masks": fold_selection_masks,
     }
 
 
